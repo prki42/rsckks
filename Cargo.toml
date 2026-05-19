@@ -1,0 +1,10 @@
+[package]
+name = "rsckks"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[dev-dependencies]
+num-bigint = "0.4"
+proptest = "1.11.0"
