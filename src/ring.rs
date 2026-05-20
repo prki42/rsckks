@@ -32,6 +32,14 @@ impl Ring {
         }
     }
 
+    pub fn n(&self) -> usize {
+        self.n
+    }
+
+    pub fn modulus(&self) -> u64 {
+        self.arith.modulus()
+    }
+
     pub fn arith(&self) -> &ModArith {
         &self.arith
     }

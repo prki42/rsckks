@@ -34,33 +34,31 @@ impl RnsRing {
         }
     }
 
+    pub fn n(&self) -> usize {
+        self.subrings[0].n()
+    }
+
     pub fn num_moduli(&self) -> usize {
         self.subrings.len()
     }
 
+    pub fn modulus(&self, i: usize) -> u64 {
+        self.subrings[i].modulus()
+    }
+
     pub fn ntt(&self, p: Poly<CoeffForm>) -> Poly<NttForm> {
-        let limbs = p
-            .limbs
-            .into_iter()
-            .zip(&self.subrings)
-            .map(|(mut data, ring)| {
-                ring.forward_ntt_ct(&mut data);
-                data
-            })
-            .collect();
+        let mut limbs = p.limbs;
+        for (limb, ring) in limbs.iter_mut().zip(&self.subrings) {
+            ring.forward_ntt_ct(limb);
+        }
         Poly::new(limbs)
     }
 
     pub fn intt(&self, p: Poly<NttForm>) -> Poly<CoeffForm> {
-        let limbs = p
-            .limbs
-            .into_iter()
-            .zip(&self.subrings)
-            .map(|(mut data, ring)| {
-                ring.inverse_ntt_gs(&mut data);
-                data
-            })
-            .collect();
+        let mut limbs = p.limbs;
+        for (limb, ring) in limbs.iter_mut().zip(&self.subrings) {
+            ring.inverse_ntt_gs(limb);
+        }
         Poly::new(limbs)
     }
 
