@@ -6,6 +6,8 @@ use crate::ckks::CkksContext;
 use crate::ckks::types::Plaintext;
 use crate::rns::{CoeffForm, NttForm, Poly};
 
+// TODO: ponder upon my decision to not borrow context??
+
 pub struct Encoder {
     n: usize,
     slots: usize,

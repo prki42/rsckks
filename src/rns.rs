@@ -1,5 +1,7 @@
 use std::marker::PhantomData;
 
+use rand::{Rng, RngExt};
+use rand_distr::StandardNormal;
 use thiserror::Error;
 
 use crate::arith::{ArithError, ModArith};
@@ -124,6 +126,82 @@ impl RnsRing {
         let mut out = Poly::new(a.limbs.clone());
         self.mul_inplace(&mut out, b);
         out
+    }
+
+    pub fn sample_ternary(&self, rng: &mut impl Rng, h: usize) -> Poly<NttForm> {
+        #[derive(Clone, PartialEq)]
+        enum Ternary {
+            Zero,
+            PlusOne,
+            MinusOne,
+        }
+
+        let n = self.n();
+        let mut coefs = vec![Ternary::Zero; n];
+        let mut n_set: usize = 0;
+
+        while n_set < h {
+            let idx = rng.random_range(0..n);
+            if coefs[idx] != Ternary::Zero {
+                continue;
+            }
+
+            match rng.random_bool(0.5) {
+                true => {
+                    coefs[idx] = Ternary::PlusOne;
+                }
+                false => {
+                    coefs[idx] = Ternary::MinusOne;
+                }
+            }
+            n_set += 1;
+        }
+
+        let q_moduli_count = self.num_moduli();
+        let mut sk_coefs = vec![vec![0u64; n]; q_moduli_count];
+
+        for coef_idx in 0..n {
+            for (mod_idx, limb) in sk_coefs.iter_mut().enumerate() {
+                let modulus = self.modulus(mod_idx);
+                limb[coef_idx] = match coefs[coef_idx] {
+                    Ternary::PlusOne => 1,
+                    Ternary::MinusOne => modulus - 1,
+                    Ternary::Zero => 0,
+                }
+            }
+        }
+
+        self.ntt(Poly::<CoeffForm>::new(sk_coefs))
+    }
+
+    pub fn sample_uniform(&self, rng: &mut impl Rng) -> Poly<NttForm> {
+        let a_limbs: Vec<Vec<u64>> = (0..self.num_moduli())
+            .map(|i| {
+                let qi = self.modulus(i);
+                (0..self.n()).map(|_| rng.random_range(0..qi)).collect()
+            })
+            .collect();
+
+        Poly::<NttForm>::new(a_limbs)
+    }
+
+    // TODO: temp, should be revised later
+    pub fn sample_gaussian(&self, rng: &mut impl Rng, sigma: f64) -> Poly<NttForm> {
+        let errors: Vec<i64> = (0..self.n())
+            .map(|_| (rng.sample::<f64, _>(StandardNormal) * sigma).round() as i64)
+            .collect();
+
+        let e_limbs: Vec<Vec<u64>> = (0..self.num_moduli())
+            .map(|i| {
+                let q = self.modulus(i) as i64;
+                errors
+                    .iter()
+                    .map(|&e| ((e % q) + q) as u64 % q as u64)
+                    .collect()
+            })
+            .collect();
+
+        self.ntt(Poly::<CoeffForm>::new(e_limbs))
     }
 }
 
