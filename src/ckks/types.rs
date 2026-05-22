@@ -1,5 +1,6 @@
 use crate::rns::{NttForm, Poly};
 
+#[derive(Debug)]
 pub struct SecretKey {
     pub(crate) sk: Poly<NttForm>,
 }

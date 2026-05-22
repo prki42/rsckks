@@ -1,4 +1,6 @@
+pub mod decryptor;
 pub mod encoder;
+pub mod encryptor;
 pub mod evaluator;
 pub mod keygen;
 pub mod params;
@@ -53,5 +55,16 @@ impl CkksContext {
 
     pub fn scale(&self) -> f64 {
         self.scale
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_utils {
+    use super::*;
+
+    // TODO: better test ctx, also should replace other adhoc ctx creations in tests
+
+    pub fn make_test_ctx() -> CkksContext {
+        CkksContext::new(&[998244353, 985661441, 754974721], &[469762049], 256, 64.0).unwrap()
     }
 }

@@ -11,6 +11,8 @@ pub enum ArithError {
     InvalidModulusSize(u64, u32),
 }
 
+// TODO: Barret reduction
+
 impl ModArith {
     pub fn new(modulus: u64) -> Result<Self, ArithError> {
         match modulus >> 61 {

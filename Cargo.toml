@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 num-complex = "0.4"
 rand = "0.10"
+rand_distr = "0.6"
 thiserror = "2"
 
 [dev-dependencies]

@@ -84,8 +84,6 @@ mod test {
     use super::*;
     use proptest::prelude::*;
 
-    // TODO revise
-
     #[test]
     fn small_values() {
         assert!(!is_prime(0));

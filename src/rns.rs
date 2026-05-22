@@ -5,9 +5,13 @@ use thiserror::Error;
 use crate::arith::{ArithError, ModArith};
 use crate::ring::{Ring, RingError};
 
+#[derive(Debug)]
 pub struct CoeffForm;
+
+#[derive(Debug)]
 pub struct NttForm;
 
+#[derive(Debug)]
 pub struct Poly<F> {
     pub limbs: Vec<Vec<u64>>,
     _form: PhantomData<F>,
@@ -76,34 +80,34 @@ impl RnsRing {
         Poly::new(limbs)
     }
 
+    pub fn add_inplace<F>(&self, a: &mut Poly<F>, b: &Poly<F>) {
+        for ((la, lb), ring) in a.limbs.iter_mut().zip(&b.limbs).zip(&self.subrings) {
+            ring.arith().add_vec(la, lb);
+        }
+    }
+
+    pub fn sub_inplace<F>(&self, a: &mut Poly<F>, b: &Poly<F>) {
+        for ((la, lb), ring) in a.limbs.iter_mut().zip(&b.limbs).zip(&self.subrings) {
+            ring.arith().sub_vec(la, lb);
+        }
+    }
+
+    pub fn mul_inplace(&self, a: &mut Poly<NttForm>, b: &Poly<NttForm>) {
+        for ((la, lb), ring) in a.limbs.iter_mut().zip(&b.limbs).zip(&self.subrings) {
+            ring.arith().mul_vec(la, lb);
+        }
+    }
+
     pub fn add<F>(&self, a: &Poly<F>, b: &Poly<F>) -> Poly<F> {
-        let limbs = a
-            .limbs
-            .iter()
-            .zip(&b.limbs)
-            .zip(&self.subrings)
-            .map(|((la, lb), ring)| {
-                let mut out = la.clone();
-                ring.arith().add_vec(&mut out, lb);
-                out
-            })
-            .collect();
-        Poly::new(limbs)
+        let mut out = Poly::new(a.limbs.clone());
+        self.add_inplace(&mut out, b);
+        out
     }
 
     pub fn sub<F>(&self, a: &Poly<F>, b: &Poly<F>) -> Poly<F> {
-        let limbs = a
-            .limbs
-            .iter()
-            .zip(&b.limbs)
-            .zip(&self.subrings)
-            .map(|((la, lb), ring)| {
-                let mut out = la.clone();
-                ring.arith().sub_vec(&mut out, lb);
-                out
-            })
-            .collect();
-        Poly::new(limbs)
+        let mut out = Poly::new(a.limbs.clone());
+        self.sub_inplace(&mut out, b);
+        out
     }
 
     pub fn neg<F>(&self, a: &Poly<F>) -> Poly<F> {
@@ -117,18 +121,9 @@ impl RnsRing {
     }
 
     pub fn mul(&self, a: &Poly<NttForm>, b: &Poly<NttForm>) -> Poly<NttForm> {
-        let limbs = a
-            .limbs
-            .iter()
-            .zip(&b.limbs)
-            .zip(&self.subrings)
-            .map(|((la, lb), ring)| {
-                let mut out = la.clone();
-                ring.arith().mul_vec(&mut out, lb);
-                out
-            })
-            .collect();
-        Poly::new(limbs)
+        let mut out = Poly::new(a.limbs.clone());
+        self.mul_inplace(&mut out, b);
+        out
     }
 }
 
