@@ -4,19 +4,35 @@ pub mod keygen;
 pub mod params;
 pub mod types;
 
-use crate::rns::RnsRing;
+use thiserror::Error;
 
+use crate::rns::{RnsRing, RnsRingError};
+
+#[derive(Debug)]
 pub struct CkksContext {
     ring_q: RnsRing,
     ring_p: RnsRing,
+    scale: f64,
+}
+
+#[derive(Error, Debug)]
+pub enum CkksContextErr {
+    #[error(transparent)]
+    RnsRing(#[from] RnsRingError),
 }
 
 impl CkksContext {
-    pub fn new(q_moduli: &[u64], p_moduli: &[u64], n: usize) -> Self {
-        CkksContext {
-            ring_q: RnsRing::new(q_moduli, n),
-            ring_p: RnsRing::new(p_moduli, n),
-        }
+    pub fn new(
+        q_moduli: &[u64],
+        p_moduli: &[u64],
+        n: usize,
+        scale: f64,
+    ) -> Result<Self, CkksContextErr> {
+        Ok(CkksContext {
+            ring_q: RnsRing::new(q_moduli, n)?,
+            ring_p: RnsRing::new(p_moduli, n)?,
+            scale,
+        })
     }
 
     pub fn ring_q(&self) -> &RnsRing {
@@ -33,5 +49,9 @@ impl CkksContext {
 
     pub fn num_levels(&self) -> usize {
         self.ring_q.num_moduli()
+    }
+
+    pub fn scale(&self) -> f64 {
+        self.scale
     }
 }

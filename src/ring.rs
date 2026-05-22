@@ -1,5 +1,8 @@
+use thiserror::Error;
+
 use crate::arith::ModArith;
 
+#[derive(Debug)]
 pub struct Ring {
     arith: ModArith,
     n: usize,
@@ -8,10 +11,28 @@ pub struct Ring {
     n_inv: u64,
 }
 
+#[derive(Error, Debug)]
+pub enum RingError {
+    #[error("no 2*{n}th root of unity found mod {modulus}")]
+    NoRootOfUnity { modulus: u64, n: usize },
+
+    #[error("{0} is not a power of two")]
+    InvalidRingSize(usize),
+}
+
 impl Ring {
-    pub fn new(arith: ModArith, n: usize) -> Self {
-        let psi = arith.primitive_root_of_unity(2 * n as u64);
+    pub fn new(arith: ModArith, n: usize) -> Result<Self, RingError> {
+        if !n.is_power_of_two() {
+            return Err(RingError::InvalidRingSize(n));
+        }
         let log_n = n.trailing_zeros();
+
+        let psi = arith
+            .primitive_root_of_unity(2 * n as u64)
+            .ok_or(RingError::NoRootOfUnity {
+                modulus: arith.modulus(),
+                n,
+            })?;
 
         let mut zetas = vec![0u64; n];
         let mut inv_zetas = vec![0u64; n];
@@ -23,13 +44,13 @@ impl Ring {
 
         let n_inv = arith.inv(n as u64);
 
-        Ring {
+        Ok(Ring {
             arith,
             n,
             zetas,
             inv_zetas,
             n_inv,
-        }
+        })
     }
 
     pub fn n(&self) -> usize {
@@ -103,7 +124,7 @@ mod tests {
     const N: usize = 256;
 
     fn make_ring() -> Ring {
-        Ring::new(ModArith::new(Q), N)
+        Ring::new(ModArith::new(Q).unwrap(), N).unwrap()
     }
 
     fn poly_vec() -> impl Strategy<Value = Vec<u64>> {

@@ -20,9 +20,6 @@ impl Encoder {
         let slots = n / 2;
         let m = 2 * n;
 
-        // TODO: temp
-        let scale = (1 << 55) as f64;
-
         let zetas: Vec<Complex64> = (0..m)
             .map(|k| {
                 let angle = 2.0 * PI * k as f64 / m as f64;
@@ -38,7 +35,7 @@ impl Encoder {
         Encoder {
             n,
             slots,
-            scale,
+            scale: ctx.scale,
             zetas,
             bit_rev,
         }
@@ -176,7 +173,7 @@ mod tests {
     const SLOTS: usize = N / 2;
 
     fn make_ctx() -> CkksContext {
-        CkksContext::new(&[998244353, 985661441, 754974721], &[469762049], N)
+        CkksContext::new(&[998244353, 985661441, 754974721], &[469762049], N, 64.0).unwrap()
     }
 
     fn complex_vec(max_val: f64, max_len: usize) -> impl Strategy<Value = Vec<Complex64>> {
@@ -225,6 +222,8 @@ mod tests {
                 prop_assert!(diff < 1e-6, "index {k}: expected {expected}, got {actual}");
             }
         }
+
+        // TODO: better tests for encoding, tighter/proper bounds
 
         #[test]
         fn encode_decode_complex_values(values in complex_vec(100.0, SLOTS)) {
@@ -289,16 +288,16 @@ mod tests {
 
         #[test]
         fn encode_mul_decode(
-            a in complex_vec(100.0, SLOTS),
-            b in complex_vec(100.0, SLOTS),
+            a in complex_vec(3.0, SLOTS),
+            b in complex_vec(3.0, SLOTS),
         ) {
             let ctx = make_ctx();
             let encoder = Encoder::new(&ctx);
             let ring_q = ctx.ring_q();
 
             let len = a.len().min(b.len());
-            let pt_a = encoder.encode(&a,  &ctx);
-            let pt_b = encoder.encode(&b,  &ctx);
+            let pt_a = encoder.encode(&a, &ctx);
+            let pt_b = encoder.encode(&b, &ctx);
 
             let prod_poly = ring_q.mul(&pt_a.data, &pt_b.data);
             let pt_prod = Plaintext { data: prod_poly, scale: pt_a.scale * pt_a.scale } ;

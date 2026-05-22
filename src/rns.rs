@@ -1,7 +1,9 @@
 use std::marker::PhantomData;
 
-use crate::arith::ModArith;
-use crate::ring::Ring;
+use thiserror::Error;
+
+use crate::arith::{ArithError, ModArith};
+use crate::ring::{Ring, RingError};
 
 pub struct CoeffForm;
 pub struct NttForm;
@@ -20,18 +22,30 @@ impl<F> Poly<F> {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum RnsRingError {
+    #[error(transparent)]
+    Arith(#[from] ArithError),
+    #[error(transparent)]
+    Ring(#[from] RingError),
+}
+
+#[derive(Debug)]
 pub struct RnsRing {
     subrings: Vec<Ring>,
 }
 
 impl RnsRing {
-    pub fn new(moduli: &[u64], n: usize) -> Self {
-        RnsRing {
-            subrings: moduli
-                .iter()
-                .map(|&q| Ring::new(ModArith::new(q), n))
-                .collect(),
-        }
+    pub fn new(moduli: &[u64], n: usize) -> Result<Self, RnsRingError> {
+        let subrings = moduli
+            .iter()
+            .map(|&q| -> Result<Ring, RnsRingError> {
+                let arith = ModArith::new(q)?;
+                Ok(Ring::new(arith, n)?)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(RnsRing { subrings })
     }
 
     pub fn n(&self) -> usize {
@@ -127,7 +141,7 @@ mod tests {
     const N: usize = 256;
 
     fn make_rns_ring() -> RnsRing {
-        RnsRing::new(MODULI, N)
+        RnsRing::new(MODULI, N).unwrap()
     }
 
     fn rns_poly_vec() -> impl Strategy<Value = Vec<Vec<u64>>> {
@@ -233,7 +247,7 @@ mod tests {
             let c_ref: Vec<Vec<u64>> = a.iter()
                 .zip(&b)
                 .zip(MODULI)
-                .map(|((la, lb), &q)| naive_negacyclic(&ModArith::new(q), la, lb))
+                .map(|((la, lb), &q)| naive_negacyclic(&ModArith::new(q).unwrap(), la, lb))
                 .collect();
 
             let a_ntt = rns.ntt(Poly::<CoeffForm>::new(a));
@@ -252,7 +266,7 @@ mod tests {
                 .zip(&b)
                 .zip(MODULI)
                 .map(|((la, lb), &q)| {
-                    let arith = ModArith::new(q);
+                    let arith = ModArith::new(q).unwrap();
                     let mut out = la.clone();
                     arith.add_vec(&mut out, lb);
                     out

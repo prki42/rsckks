@@ -1,10 +1,22 @@
+use thiserror::Error;
+
+#[derive(Debug)]
 pub struct ModArith {
     modulus: u64,
 }
 
+#[derive(Error, Debug)]
+pub enum ArithError {
+    #[error("{0} is not a valid modulus, should be < 2^{1}")]
+    InvalidModulusSize(u64, u32),
+}
+
 impl ModArith {
-    pub fn new(modulus: u64) -> Self {
-        ModArith { modulus }
+    pub fn new(modulus: u64) -> Result<Self, ArithError> {
+        match modulus >> 61 {
+            0 => Ok(ModArith { modulus }),
+            _ => Err(ArithError::InvalidModulusSize(modulus, 61)),
+        }
     }
 
     pub fn modulus(&self) -> u64 {
@@ -52,7 +64,7 @@ impl ModArith {
         if a == 0 { 0 } else { self.modulus - a }
     }
 
-    pub fn primitive_root_of_unity(&self, order: u64) -> u64 {
+    pub fn primitive_root_of_unity(&self, order: u64) -> Option<u64> {
         debug_assert_eq!(
             (self.modulus - 1) % order,
             0,
@@ -63,13 +75,10 @@ impl ModArith {
         for g in 2..self.modulus {
             let root = self.pow(g, exp);
             if root != 1 && self.pow(root, order / 2) == self.modulus - 1 {
-                return root;
+                return Some(root);
             }
         }
-        panic!(
-            "no primitive {order}-th root of unity found mod {}",
-            self.modulus
-        );
+        None
     }
 
     pub fn add_vec(&self, a: &mut [u64], b: &[u64]) {
@@ -102,7 +111,7 @@ mod tests {
     const Q: u64 = 7681;
 
     fn arith() -> ModArith {
-        ModArith::new(Q)
+        ModArith::new(Q).unwrap()
     }
 
     fn elem() -> impl Strategy<Value = u64> {
