@@ -1,5 +1,5 @@
 use crate::ckks::CkksContext;
-use crate::ckks::types::{Ciphertext, GaloisKeys, Plaintext, RelinKey};
+use crate::ckks::types::{Ciphertext, Plaintext, RelinKey};
 use thiserror::Error;
 
 pub struct Evaluator<'a> {
@@ -67,10 +67,6 @@ impl<'a> Evaluator<'a> {
     }
 
     pub fn rescale(&self, _ct: &Ciphertext) -> Ciphertext {
-        todo!()
-    }
-
-    pub fn rotate(&self, _ct: &Ciphertext, _steps: i32, _gk: &GaloisKeys) -> Ciphertext {
         todo!()
     }
 

@@ -14,10 +14,6 @@ pub struct RelinKey {
     pub(crate) keys: Vec<(Poly<NttForm>, Poly<NttForm>)>,
 }
 
-pub struct GaloisKeys {
-    pub(crate) keys: Vec<(usize, RelinKey)>,
-}
-
 pub struct Plaintext {
     pub(crate) data: Poly<NttForm>,
     pub(crate) scale: f64,

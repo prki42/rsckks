@@ -1,5 +1,5 @@
 use crate::ckks::CkksContext;
-use crate::ckks::types::{GaloisKeys, PublicKey, RelinKey, SecretKey};
+use crate::ckks::types::{PublicKey, RelinKey, SecretKey};
 
 pub struct KeyGenerator<'a> {
     ctx: &'a CkksContext,
@@ -37,10 +37,6 @@ impl<'a> KeyGenerator<'a> {
     }
 
     pub fn relin_key(&self, _sk: &SecretKey) -> RelinKey {
-        todo!()
-    }
-
-    pub fn galois_keys(&self, _sk: &SecretKey, _rotations: &[i32]) -> GaloisKeys {
         todo!()
     }
 }

@@ -8,12 +8,13 @@ pub mod types;
 
 use thiserror::Error;
 
-use crate::rns::{RnsRing, RnsRingError};
+use crate::rns::{CrossRingPrecomp, RnsRing, RnsRingError};
 
 #[derive(Debug)]
 pub struct CkksContext {
     ring_q: RnsRing,
     ring_p: RnsRing,
+    cross_ring: CrossRingPrecomp,
     scale: f64,
 }
 
@@ -30,9 +31,13 @@ impl CkksContext {
         n: usize,
         scale: f64,
     ) -> Result<Self, CkksContextErr> {
+        let ring_q = RnsRing::new(q_moduli, n)?;
+        let ring_p = RnsRing::new(p_moduli, n)?;
+        let cross_ring = CrossRingPrecomp::new(&ring_q, &ring_p);
         Ok(CkksContext {
-            ring_q: RnsRing::new(q_moduli, n)?,
-            ring_p: RnsRing::new(p_moduli, n)?,
+            ring_q,
+            ring_p,
+            cross_ring,
             scale,
         })
     }
@@ -62,7 +67,7 @@ impl CkksContext {
 pub(crate) mod test_utils {
     use super::*;
 
-    // TODO: better test ctx, also should replace other adhoc ctx creations in tests
+    // TODO: better test ctx, also should replace adhoc ctx creations in other tests
 
     pub fn make_test_ctx() -> CkksContext {
         CkksContext::new(&[998244353, 985661441, 754974721], &[469762049], 256, 64.0).unwrap()

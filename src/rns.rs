@@ -9,7 +9,6 @@ use crate::ring::{Ring, RingError};
 
 #[derive(Debug)]
 pub struct CoeffForm;
-
 #[derive(Debug)]
 pub struct NttForm;
 
@@ -32,13 +31,56 @@ impl<F> Poly<F> {
 pub enum RnsRingError {
     #[error(transparent)]
     Arith(#[from] ArithError),
+
     #[error(transparent)]
     Ring(#[from] RingError),
 }
 
 #[derive(Debug)]
+pub struct CrossRingPrecomp {
+    // (Q/q_i) mod p_k — for Q→P conversion
+    pub q_hat_mod_p: Vec<Vec<u64>>,
+    // (P/p_k) mod q_i — for P→Q conversion
+    pub p_hat_mod_q: Vec<Vec<u64>>,
+}
+
+impl CrossRingPrecomp {
+    pub fn new(ring_q: &RnsRing, ring_p: &RnsRing) -> Self {
+        let q_hat_mod_p = Self::compute_hat_mod_target(ring_q, ring_p);
+        let p_hat_mod_q = Self::compute_hat_mod_target(ring_p, ring_q);
+        CrossRingPrecomp {
+            q_hat_mod_p,
+            p_hat_mod_q,
+        }
+    }
+
+    // For each source modulus i, compute (product of all other source moduli) mod each target modulus
+    fn compute_hat_mod_target(source: &RnsRing, target: &RnsRing) -> Vec<Vec<u64>> {
+        let src_count = source.num_moduli();
+        let tgt_count = target.num_moduli();
+        let mut table = vec![vec![0u64; tgt_count]; src_count];
+
+        for (i, table_row) in table.iter_mut().enumerate() {
+            for (k, table_elem) in table_row.iter_mut().enumerate() {
+                let ak = target.subrings[k].arith();
+                let mut product = 1u64;
+                for (j, _) in source.subrings.iter().enumerate() {
+                    if i != j {
+                        product = ak.mul(product, source.modulus(j) % ak.modulus());
+                    }
+                }
+                *table_elem = product;
+            }
+        }
+
+        table
+    }
+}
+
+#[derive(Debug)]
 pub struct RnsRing {
     subrings: Vec<Ring>,
+    hat_inv: Vec<u64>,
 }
 
 impl RnsRing {
@@ -51,7 +93,25 @@ impl RnsRing {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(RnsRing { subrings })
+        let hat_inv = Self::compute_hat_inv(&subrings, moduli);
+
+        Ok(RnsRing { subrings, hat_inv })
+    }
+
+    fn compute_hat_inv(subrings: &[Ring], moduli: &[u64]) -> Vec<u64> {
+        let k = moduli.len();
+        let mut hat_inv = vec![0u64; k];
+        for i in 0..k {
+            let ai = subrings[i].arith();
+            let mut product = 1u64;
+            for (j, &qj) in moduli.iter().enumerate() {
+                if i != j {
+                    product = ai.mul(product, qj % ai.modulus());
+                }
+            }
+            hat_inv[i] = ai.inv(product);
+        }
+        hat_inv
     }
 
     pub fn n(&self) -> usize {
@@ -128,6 +188,47 @@ impl RnsRing {
         out
     }
 
+    /* TODO
+      Regarding base conversion related code, once i figure out where to keep track of levels
+      I should check the code below to make sure it complies with the decision.
+    */
+
+    pub fn crt_coefficients(&self, poly: &Poly<CoeffForm>) -> Vec<Vec<u64>> {
+        poly.limbs
+            .iter()
+            .enumerate()
+            .map(|(i, limb)| {
+                let ai = self.subrings[i].arith();
+                limb.iter().map(|&c| ai.mul(c, self.hat_inv[i])).collect()
+            })
+            .collect()
+    }
+
+    /// Approximate base conversion: result may differ from true value
+    /// by the k*(product of source moduli) where k < (number of source moduli)
+    pub fn base_convert(
+        &self,
+        crt_coeffs: &[Vec<u64>],
+        cross_table: &[Vec<u64>],
+    ) -> Poly<CoeffForm> {
+        let n = crt_coeffs[0].len();
+        let limbs = (0..self.num_moduli())
+            .map(|k| {
+                let ak = self.subrings[k].arith();
+                (0..n)
+                    .map(|j| {
+                        let mut sum = 0u64;
+                        for (i, crt_limb) in crt_coeffs.iter().enumerate() {
+                            sum = ak.add(sum, ak.mul(crt_limb[j], cross_table[i][k]));
+                        }
+                        sum
+                    })
+                    .collect()
+            })
+            .collect();
+        Poly::new(limbs)
+    }
+
     pub fn sample_ternary(&self, rng: &mut impl Rng, h: usize) -> Poly<NttForm> {
         #[derive(Clone, PartialEq)]
         enum Ternary {
@@ -146,14 +247,10 @@ impl RnsRing {
                 continue;
             }
 
-            match rng.random_bool(0.5) {
-                true => {
-                    coefs[idx] = Ternary::PlusOne;
-                }
-                false => {
-                    coefs[idx] = Ternary::MinusOne;
-                }
-            }
+            coefs[idx] = match rng.random_bool(0.5) {
+                true => Ternary::PlusOne,
+                false => Ternary::MinusOne,
+            };
             n_set += 1;
         }
 
@@ -210,15 +307,16 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    const MODULI: &[u64] = &[7681, 12289, 40961];
+    const Q_MODULI: &[u64] = &[7681, 12289, 40961];
+    const P_MODULI: &[u64] = &[65537, 786433];
     const N: usize = 256;
 
     fn make_rns_ring() -> RnsRing {
-        RnsRing::new(MODULI, N).unwrap()
+        RnsRing::new(Q_MODULI, N).unwrap()
     }
 
     fn rns_poly_vec() -> impl Strategy<Value = Vec<Vec<u64>>> {
-        MODULI
+        Q_MODULI
             .iter()
             .map(|&q| proptest::collection::vec(0..q, N))
             .collect::<Vec<_>>()
@@ -319,7 +417,7 @@ mod tests {
 
             let c_ref: Vec<Vec<u64>> = a.iter()
                 .zip(&b)
-                .zip(MODULI)
+                .zip(Q_MODULI)
                 .map(|((la, lb), &q)| naive_negacyclic(&ModArith::new(q).unwrap(), la, lb))
                 .collect();
 
@@ -337,7 +435,7 @@ mod tests {
 
             let c_ref: Vec<Vec<u64>> = a.iter()
                 .zip(&b)
-                .zip(MODULI)
+                .zip(Q_MODULI)
                 .map(|((la, lb), &q)| {
                     let arith = ModArith::new(q).unwrap();
                     let mut out = la.clone();
@@ -352,6 +450,75 @@ mod tests {
             let c = rns.intt(c_ntt);
 
             prop_assert_eq!(c.limbs, c_ref);
+        }
+    }
+
+    fn make_q_ring() -> RnsRing {
+        RnsRing::new(Q_MODULI, N).unwrap()
+    }
+
+    fn make_p_ring() -> RnsRing {
+        RnsRing::new(P_MODULI, N).unwrap()
+    }
+
+    fn coeff_poly(coeff_max_val: u64) -> impl Strategy<Value = Vec<u64>> {
+        proptest::collection::vec(0..=coeff_max_val, N)
+    }
+
+    fn coeff_poly_to_rns(coeffs: &[u64], ring: &RnsRing) -> Poly<CoeffForm> {
+        let limbs = (0..ring.num_moduli())
+            .map(|i| {
+                let q = ring.modulus(i);
+                coeffs.iter().map(|&c| c % q).collect()
+            })
+            .collect();
+        Poly::new(limbs)
+    }
+
+    fn is_multiple_of_q_mod_p(diff: u64, q_mod_p: u64, p: u64, max_k: u64) -> bool {
+        (0..max_k).any(|k| (k as u128 * q_mod_p as u128 % p as u128) as u64 == diff)
+    }
+
+    // Compute (product of all source moduli) mod each target modulus
+    fn compute_product_mod_target(source: &RnsRing, target: &RnsRing) -> Vec<u64> {
+        (0..target.num_moduli())
+            .map(|k| {
+                let ak = target.subrings[k].arith();
+                let mut product = 1u64;
+                for i in 0..source.num_moduli() {
+                    product = ak.mul(product, source.modulus(i) % ak.modulus());
+                }
+                product
+            })
+            .collect()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(30))]
+
+        #[test]
+        fn base_extend_q_to_p_error_bounded(coeffs in coeff_poly(3000)) {
+            let ring_q = make_q_ring();
+            let ring_p = make_p_ring();
+            let cross = CrossRingPrecomp::new(&ring_q, &ring_p);
+            let l = ring_q.num_moduli() as u64;
+
+            let poly_q = coeff_poly_to_rns(&coeffs, &ring_q);
+            let crt = ring_q.crt_coefficients(&poly_q);
+            let poly_p = ring_p.base_convert(&crt, &cross.q_hat_mod_p);
+
+            let q_mod_p = compute_product_mod_target(&ring_q, &ring_p);
+
+            for k in 0..ring_p.num_moduli() {
+                let pk = ring_p.modulus(k);
+                for j in 0..N {
+                    let diff = (poly_p.limbs[k][j] + pk - coeffs[j]) % pk;
+                    prop_assert!(
+                        is_multiple_of_q_mod_p(diff, q_mod_p[k], pk, l),
+                        "coeff {} mod p_{}: diff {} not k*Q mod p for any k < {}", j, k, diff, l
+                    );
+                }
+            }
         }
     }
 }
