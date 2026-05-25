@@ -24,6 +24,7 @@ fn main_bench(c: &mut Criterion) {
     let keygen = KeyGenerator::new(&ctx);
     let sk = keygen.secret_key();
     let pk = keygen.public_key(&sk);
+    let evk = keygen.relin_key(&sk);
     let enc = Encryptor::new(&ctx, &pk);
     let dec = Decryptor::new(&ctx, &sk);
     let encoder = Encoder::new(&ctx);
@@ -62,6 +63,12 @@ fn main_bench(c: &mut Criterion) {
     c.bench_function("add", |b| {
         b.iter(|| {
             black_box(evaluator.add(&ct1, &ct2).unwrap());
+        });
+    });
+
+    c.bench_function("mul,rs", |b| {
+        b.iter(|| {
+            black_box(evaluator.mul(&ct1, &ct2, &evk).unwrap());
         });
     });
 

@@ -1,5 +1,6 @@
 use crate::ckks::CkksContext;
 use crate::ckks::types::{Ciphertext, Plaintext, PublicKey};
+use crate::sampling::{sample_gaussian, sample_ternary};
 
 pub struct Encryptor<'a> {
     ctx: &'a CkksContext,
@@ -14,12 +15,20 @@ impl<'a> Encryptor<'a> {
     pub fn encrypt(&self, pt: &Plaintext) -> Ciphertext {
         let mut rng = rand::rng();
 
-        // TODO: consider providing "inplace" sampling functions and reusing error polynomials
-        // (probably not worth it)
-        let e0 = self.ctx.ring_q.sample_gaussian(&mut rng, 3.2);
-        let e1 = self.ctx.ring_q.sample_gaussian(&mut rng, 3.2);
+        let e0 = self
+            .ctx
+            .ring_q
+            .poly_from_i64(&sample_gaussian(self.ctx.n(), &mut rng, 3.2));
+        let e1 = self
+            .ctx
+            .ring_q
+            .poly_from_i64(&sample_gaussian(self.ctx.n(), &mut rng, 3.2));
 
-        let v = self.ctx.ring_q.sample_ternary(&mut rng, self.ctx.n() / 2);
+        let v = self.ctx.ring_q.poly_from_ternary(&sample_ternary(
+            self.ctx.n(),
+            &mut rng,
+            self.ctx.n() / 2,
+        ));
 
         // c0 = (v * b) + p + e0
         let mut c0 = self.ctx.ring_q.mul(&v, &self.pk.b);
@@ -35,7 +44,6 @@ impl<'a> Encryptor<'a> {
             c0,
             c1,
             scale: pt.scale,
-            level: self.ctx.ring_q.num_moduli(),
         }
     }
 }

@@ -2,7 +2,8 @@ use crate::rns::{NttForm, Poly};
 
 #[derive(Debug)]
 pub struct SecretKey {
-    pub(crate) sk: Poly<NttForm>,
+    pub(crate) sk_q: Poly<NttForm>,
+    pub(crate) sk_p: Poly<NttForm>,
 }
 
 pub struct PublicKey {
@@ -11,7 +12,8 @@ pub struct PublicKey {
 }
 
 pub struct RelinKey {
-    pub(crate) keys: Vec<(Poly<NttForm>, Poly<NttForm>)>,
+    pub(crate) mod_q: (Poly<NttForm>, Poly<NttForm>),
+    pub(crate) mod_p: (Poly<NttForm>, Poly<NttForm>),
 }
 
 pub struct Plaintext {
@@ -23,7 +25,6 @@ pub struct Ciphertext {
     pub(crate) c0: Poly<NttForm>,
     pub(crate) c1: Poly<NttForm>,
     pub(crate) scale: f64,
-    pub(crate) level: usize,
 }
 
 impl Ciphertext {
@@ -32,12 +33,16 @@ impl Ciphertext {
     }
 
     pub fn level(&self) -> usize {
-        self.level
+        self.c0.limbs.len() - 1
     }
 }
 
 impl Plaintext {
     pub fn scale(&self) -> f64 {
         self.scale
+    }
+
+    pub fn level(&self) -> usize {
+        self.data.limbs.len() - 1
     }
 }

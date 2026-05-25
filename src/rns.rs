@@ -1,18 +1,18 @@
 use std::marker::PhantomData;
 
 use rand::{Rng, RngExt};
-use rand_distr::StandardNormal;
 use thiserror::Error;
 
 use crate::arith::{ArithError, ModArith};
 use crate::ring::{Ring, RingError};
+use crate::sampling::Ternary;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CoeffForm;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NttForm;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Poly<F> {
     pub limbs: Vec<Vec<u64>>,
     _form: PhantomData<F>,
@@ -38,19 +38,26 @@ pub enum RnsRingError {
 
 #[derive(Debug)]
 pub struct CrossRingPrecomp {
-    // (Q/q_i) mod p_k — for Q→P conversion
+    // q_hat = (Q/q_i) mod p_k — for Q->P conversion
     pub q_hat_mod_p: Vec<Vec<u64>>,
-    // (P/p_k) mod q_i — for P→Q conversion
+    // p_hat = (P/p_k) mod q_i — for P->Q conversion
     pub p_hat_mod_q: Vec<Vec<u64>>,
+    // P^{-1} mod q_i - for ModDown scaling
+    pub p_inv_mod_q: Vec<u64>,
+    // P mod q_i
+    pub p_mod_q: Vec<u64>,
 }
 
 impl CrossRingPrecomp {
     pub fn new(ring_q: &RnsRing, ring_p: &RnsRing) -> Self {
         let q_hat_mod_p = Self::compute_hat_mod_target(ring_q, ring_p);
         let p_hat_mod_q = Self::compute_hat_mod_target(ring_p, ring_q);
+        let (p_mod_q, p_inv_mod_q) = Self::compute_product_and_inv(ring_p, ring_q);
         CrossRingPrecomp {
             q_hat_mod_p,
             p_hat_mod_q,
+            p_inv_mod_q,
+            p_mod_q,
         }
     }
 
@@ -75,12 +82,27 @@ impl CrossRingPrecomp {
 
         table
     }
+
+    fn compute_product_and_inv(source: &RnsRing, target: &RnsRing) -> (Vec<u64>, Vec<u64>) {
+        let (products, inverses) = (0..target.num_moduli())
+            .map(|k| {
+                let ak = target.subrings[k].arith();
+                let mut product = 1u64;
+                for i in 0..source.num_moduli() {
+                    product = ak.mul(product, source.modulus(i) % ak.modulus());
+                }
+                (product, ak.inv(product))
+            })
+            .unzip();
+        (products, inverses)
+    }
 }
 
 #[derive(Debug)]
 pub struct RnsRing {
     subrings: Vec<Ring>,
     hat_inv: Vec<u64>,
+    ql_inv: Vec<Vec<u64>>,
 }
 
 impl RnsRing {
@@ -94,8 +116,28 @@ impl RnsRing {
             .collect::<Result<Vec<_>, _>>()?;
 
         let hat_inv = Self::compute_hat_inv(&subrings, moduli);
+        let ql_inv = Self::compute_ql_inv(&subrings, moduli);
 
-        Ok(RnsRing { subrings, hat_inv })
+        Ok(RnsRing {
+            subrings,
+            hat_inv,
+            ql_inv,
+        })
+    }
+
+    // ql_inv[l][i] = q_l^{-1} mod q_i for all i < l
+    fn compute_ql_inv(subrings: &[Ring], moduli: &[u64]) -> Vec<Vec<u64>> {
+        let k = moduli.len();
+        (0..k)
+            .map(|l| {
+                (0..l)
+                    .map(|i| {
+                        let ai = subrings[i].arith();
+                        ai.inv(moduli[l] % ai.modulus())
+                    })
+                    .collect()
+            })
+            .collect()
     }
 
     fn compute_hat_inv(subrings: &[Ring], moduli: &[u64]) -> Vec<u64> {
@@ -160,6 +202,12 @@ impl RnsRing {
         }
     }
 
+    pub fn mul_const<F>(&self, a: &mut Poly<F>, c: &[u64]) {
+        for ((limb, &c_mod), ring) in a.limbs.iter_mut().zip(c).zip(&self.subrings) {
+            ring.arith().mul_vec_const(limb, c_mod);
+        }
+    }
+
     pub fn add<F>(&self, a: &Poly<F>, b: &Poly<F>) -> Poly<F> {
         let mut out = Poly::new(a.limbs.clone());
         self.add_inplace(&mut out, b);
@@ -206,13 +254,9 @@ impl RnsRing {
 
     /// Approximate base conversion: result may differ from true value
     /// by the k*(product of source moduli) where k < (number of source moduli)
-    pub fn base_convert(
-        &self,
-        crt_coeffs: &[Vec<u64>],
-        cross_table: &[Vec<u64>],
-    ) -> Poly<CoeffForm> {
+    fn base_convert(&self, crt_coeffs: &[Vec<u64>], cross_table: &[Vec<u64>]) -> Vec<Vec<u64>> {
         let n = crt_coeffs[0].len();
-        let limbs = (0..self.num_moduli())
+        (0..self.num_moduli())
             .map(|k| {
                 let ak = self.subrings[k].arith();
                 (0..n)
@@ -225,50 +269,53 @@ impl RnsRing {
                     })
                     .collect()
             })
-            .collect();
-        Poly::new(limbs)
+            .collect()
     }
 
-    pub fn sample_ternary(&self, rng: &mut impl Rng, h: usize) -> Poly<NttForm> {
-        #[derive(Clone, PartialEq)]
-        enum Ternary {
-            Zero,
-            PlusOne,
-            MinusOne,
-        }
+    pub fn mod_change(
+        &self,
+        poly: &Poly<CoeffForm>,
+        src_ring: &RnsRing,
+        cross_table: &[Vec<u64>],
+    ) -> Poly<CoeffForm> {
+        let crt_coeffs = src_ring.crt_coefficients(poly);
+        Poly::new(self.base_convert(&crt_coeffs, cross_table))
+    }
 
-        let n = self.n();
-        let mut coefs = vec![Ternary::Zero; n];
-        let mut n_set: usize = 0;
+    pub fn mod_scale_down(
+        &self,
+        poly_self: &mut Poly<CoeffForm>,
+        poly_other: &Poly<CoeffForm>,
+        other_ring: &RnsRing,
+        cross_table: &[Vec<u64>],
+        inv_mod_self: &[u64],
+    ) {
+        let crt_coeffs = other_ring.crt_coefficients(poly_other);
+        let other_converted = self.base_convert(&crt_coeffs, cross_table);
+        poly_self
+            .limbs
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, limb)| {
+                let arith = self.subrings[i].arith();
+                arith.sub_vec(limb, &other_converted[i]);
+                limb.iter_mut()
+                    .for_each(|x| *x = arith.mul(*x, inv_mod_self[i]));
+            });
+    }
 
-        while n_set < h {
-            let idx = rng.random_range(0..n);
-            if coefs[idx] != Ternary::Zero {
-                continue;
+    pub fn rescale(&self, poly: &mut Poly<CoeffForm>) {
+        let l = poly.limbs.len() - 1;
+        let last = poly.limbs.pop().unwrap();
+        let inv = &self.ql_inv[l];
+
+        for (i, limb) in poly.limbs.iter_mut().enumerate() {
+            let ai = self.subrings[i].arith();
+            for (coef, &last_coef) in limb.iter_mut().zip(&last) {
+                let last_reduced = last_coef % ai.modulus();
+                *coef = ai.mul(ai.sub(*coef, last_reduced), inv[i]);
             }
-
-            coefs[idx] = match rng.random_bool(0.5) {
-                true => Ternary::PlusOne,
-                false => Ternary::MinusOne,
-            };
-            n_set += 1;
         }
-
-        let q_moduli_count = self.num_moduli();
-        let mut sk_coefs = vec![vec![0u64; n]; q_moduli_count];
-
-        for coef_idx in 0..n {
-            for (mod_idx, limb) in sk_coefs.iter_mut().enumerate() {
-                let modulus = self.modulus(mod_idx);
-                limb[coef_idx] = match coefs[coef_idx] {
-                    Ternary::PlusOne => 1,
-                    Ternary::MinusOne => modulus - 1,
-                    Ternary::Zero => 0,
-                }
-            }
-        }
-
-        self.ntt(Poly::<CoeffForm>::new(sk_coefs))
     }
 
     pub fn sample_uniform(&self, rng: &mut impl Rng) -> Poly<NttForm> {
@@ -282,23 +329,36 @@ impl RnsRing {
         Poly::<NttForm>::new(a_limbs)
     }
 
-    // TODO: temp, should be revised later
-    pub fn sample_gaussian(&self, rng: &mut impl Rng, sigma: f64) -> Poly<NttForm> {
-        let errors: Vec<i64> = (0..self.n())
-            .map(|_| (rng.sample::<f64, _>(StandardNormal) * sigma).round() as i64)
-            .collect();
+    // TODO: make error/ternary sampling less cumbersome
 
-        let e_limbs: Vec<Vec<u64>> = (0..self.num_moduli())
+    pub fn poly_from_ternary(&self, v: &[Ternary]) -> Poly<NttForm> {
+        let n = v.len();
+        let moduli_count = self.num_moduli();
+        let mut sk_coefs = vec![vec![0u64; n]; moduli_count];
+
+        for coef_idx in 0..n {
+            for (mod_idx, limb) in sk_coefs.iter_mut().enumerate() {
+                let modulus = self.modulus(mod_idx);
+                limb[coef_idx] = match v[coef_idx] {
+                    Ternary::PlusOne => 1,
+                    Ternary::MinusOne => modulus - 1,
+                    Ternary::Zero => 0,
+                }
+            }
+        }
+
+        self.ntt(Poly::<CoeffForm>::new(sk_coefs))
+    }
+
+    pub fn poly_from_i64(&self, v: &[i64]) -> Poly<NttForm> {
+        let v_limbs: Vec<Vec<u64>> = (0..self.num_moduli())
             .map(|i| {
                 let q = self.modulus(i) as i64;
-                errors
-                    .iter()
-                    .map(|&e| ((e % q) + q) as u64 % q as u64)
-                    .collect()
+                v.iter().map(|&e| ((e % q) + q) as u64 % q as u64).collect()
             })
             .collect();
 
-        self.ntt(Poly::<CoeffForm>::new(e_limbs))
+        self.ntt(Poly::<CoeffForm>::new(v_limbs))
     }
 }
 
@@ -504,8 +564,7 @@ mod tests {
             let l = ring_q.num_moduli() as u64;
 
             let poly_q = coeff_poly_to_rns(&coeffs, &ring_q);
-            let crt = ring_q.crt_coefficients(&poly_q);
-            let poly_p = ring_p.base_convert(&crt, &cross.q_hat_mod_p);
+            let poly_p = ring_p.mod_change(&poly_q, &ring_q, &cross.q_hat_mod_p);
 
             let q_mod_p = compute_product_mod_target(&ring_q, &ring_p);
 
@@ -516,6 +575,33 @@ mod tests {
                     prop_assert!(
                         is_multiple_of_q_mod_p(diff, q_mod_p[k], pk, l),
                         "coeff {} mod p_{}: diff {} not k*Q mod p for any k < {}", j, k, diff, l
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn mod_scale_down_small_values_near_zero(coeffs in coeff_poly(3000)) {
+            let ring_q = make_q_ring();
+            let ring_p = make_p_ring();
+            let cross = CrossRingPrecomp::new(&ring_q, &ring_p);
+            let k = ring_p.num_moduli() as u64;
+
+            let mut poly_q = coeff_poly_to_rns(&coeffs, &ring_q);
+            let poly_p = coeff_poly_to_rns(&coeffs, &ring_p);
+
+            ring_q.mod_scale_down(
+                &mut poly_q, &poly_p, &ring_p,
+                &cross.p_hat_mod_q, &cross.p_inv_mod_q,
+            );
+
+            for (i, limb) in poly_q.limbs.iter().enumerate() {
+                let qi = ring_q.modulus(i);
+                for (j, &val) in limb.iter().enumerate() {
+                    let signed = if val > qi / 2 { qi - val } else { val };
+                    prop_assert!(
+                        signed < k,
+                        "coeff {} mod q_{}: {} >= {}", j, i, signed, k
                     );
                 }
             }

@@ -103,6 +103,12 @@ impl ModArith {
             *lhs = self.mul(*lhs, rhs);
         }
     }
+
+    pub fn mul_vec_const(&self, a: &mut [u64], c: u64) {
+        for el in a.iter_mut() {
+            *el = self.mul(*el, c);
+        }
+    }
 }
 
 #[cfg(test)]

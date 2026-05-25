@@ -12,7 +12,7 @@ impl<'a> Decryptor<'a> {
     }
 
     pub fn decrypt(&self, ct: &Ciphertext) -> Plaintext {
-        let mut p = self.ctx.ring_q.mul(&ct.c1, &self.sk.sk);
+        let mut p = self.ctx.ring_q.mul(&ct.c1, &self.sk.sk_q);
         self.ctx.ring_q.add_inplace(&mut p, &ct.c0);
 
         Plaintext {
@@ -47,7 +47,6 @@ mod tests {
         let ct = Ciphertext {
             c0: ctx.ring_q.sample_uniform(&mut rng),
             c1: ctx.ring_q.sample_uniform(&mut rng),
-            level: 3,
             scale: 10.0,
         };
 
