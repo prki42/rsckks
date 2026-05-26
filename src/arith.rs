@@ -27,6 +27,9 @@ impl ModArith {
 
     #[inline]
     pub fn add(&self, a: u64, b: u64) -> u64 {
+        debug_assert!(a < self.modulus);
+        debug_assert!(b < self.modulus);
+
         let s = a + b;
         if s >= self.modulus {
             s - self.modulus
@@ -37,11 +40,17 @@ impl ModArith {
 
     #[inline]
     pub fn sub(&self, a: u64, b: u64) -> u64 {
+        debug_assert!(a < self.modulus);
+        debug_assert!(b < self.modulus);
+
         if a >= b { a - b } else { self.modulus - b + a }
     }
 
     #[inline]
     pub fn mul(&self, a: u64, b: u64) -> u64 {
+        debug_assert!(a < self.modulus);
+        debug_assert!(b < self.modulus);
+
         (a as u128 * b as u128 % self.modulus as u128) as u64
     }
 

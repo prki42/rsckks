@@ -263,7 +263,8 @@ impl RnsRing {
                     .map(|j| {
                         let mut sum = 0u64;
                         for (i, crt_limb) in crt_coeffs.iter().enumerate() {
-                            sum = ak.add(sum, ak.mul(crt_limb[j], cross_table[i][k]));
+                            sum =
+                                ak.add(sum, ak.mul(crt_limb[j] % ak.modulus(), cross_table[i][k]));
                         }
                         sum
                     })
