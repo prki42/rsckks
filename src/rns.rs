@@ -293,16 +293,12 @@ impl RnsRing {
     ) {
         let crt_coeffs = other_ring.crt_coefficients(poly_other);
         let other_converted = self.base_convert(&crt_coeffs, cross_table);
-        poly_self
-            .limbs
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, limb)| {
-                let arith = self.subrings[i].arith();
-                arith.sub_vec(limb, &other_converted[i]);
-                limb.iter_mut()
-                    .for_each(|x| *x = arith.mul(*x, inv_mod_self[i]));
-            });
+        for (i, limb) in poly_self.limbs.iter_mut().enumerate() {
+            let arith = self.subrings[i].arith();
+            arith.sub_vec(limb, &other_converted[i]);
+            limb.iter_mut()
+                .for_each(|x| *x = arith.mul(*x, inv_mod_self[i]));
+        }
     }
 
     pub fn rescale(&self, poly: &mut Poly<CoeffForm>) {

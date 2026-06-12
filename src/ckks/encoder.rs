@@ -194,8 +194,13 @@ mod tests {
     }
 
     impl Encoder {
-        fn encoding_error(&self) -> f64 {
+        fn encoding_err_upper_bound(&self) -> f64 {
             (self.n as f64) / (2.0 * self.scale)
+        }
+
+        fn mul_err_upper_bouund(&self, inf_norm1: f64, inf_norm2: f64) -> f64 {
+            return (((self.n as f64) * (inf_norm1 + inf_norm2)) / (self.scale * 2.0))
+                + ((self.n as f64).powf(2.0) / (4.0 * self.scale.powf(2.0)));
         }
     }
 
@@ -204,8 +209,8 @@ mod tests {
 
         #[test]
         fn fft_ifft_roundtrip(
-            re in proptest::collection::vec(-100.0f64..100.0, N),
-            im in proptest::collection::vec(-100.0f64..100.0, N),
+            re in proptest::collection::vec(-100.0..100.0, N),
+            im in proptest::collection::vec(-100.0..100.0, N),
         ) {
             let ctx = make_ctx();
             let encoder = Encoder::new(&ctx);
@@ -225,7 +230,7 @@ mod tests {
             }
         }
 
-        // TODO: better tests for encoding, tighter/proper bounds
+        // TODO: better tests for encoding
 
         #[test]
         fn encode_decode_complex_values(values in complex_vec(100.0, SLOTS)) {
@@ -238,7 +243,7 @@ mod tests {
             for (i, (&expected, &actual)) in values.iter().zip(decoded.iter()).enumerate() {
                 let diff = (expected - actual).norm();
                 prop_assert!(
-                    diff < encoder.encoding_error(),
+                    diff < encoder.encoding_err_upper_bound(),
                     "slot {i}: expected {expected}, got {actual}, diff {diff}"
                 );
             }
@@ -255,7 +260,7 @@ mod tests {
             for (i, (&expected, &actual)) in values.iter().zip(decoded.iter()).enumerate() {
                 let diff = (expected - actual).norm();
                 prop_assert!(
-                    diff < encoder.encoding_error(),
+                    diff < encoder.encoding_err_upper_bound(),
                     "slot {i}: expected {expected}, got {actual}, diff {diff}"
                 );
             }
@@ -278,11 +283,12 @@ mod tests {
             let pt_sum = Plaintext { data: sum_poly, scale: pt_a.scale };
             let decoded = encoder.decode(&pt_sum, &ctx);
 
+            let err_bound = encoder.encoding_err_upper_bound() * 2.0;
             for i in 0..len {
                 let expected = a[i] + b[i];
                 let diff = (expected - decoded[i]).norm();
                 prop_assert!(
-                    diff < encoder.encoding_error() * 2.0,
+                    diff < err_bound,
                     "slot {i}: expected {expected}, got {}, diff {diff}", decoded[i]
                 );
             }
@@ -305,12 +311,16 @@ mod tests {
             let pt_prod = Plaintext { data: prod_poly, scale: pt_a.scale * pt_a.scale } ;
             let decoded = encoder.decode(&pt_prod, &ctx);
 
+            let inf_norm = |z: &Vec<Complex64>| -> f64 {
+                z.iter().map(|z| z.norm()).max_by(|zi, zj| zi.partial_cmp(zj).expect("NaN")).unwrap()
+            };
+
+            let err_bound = encoder.mul_err_upper_bouund(inf_norm(&a), inf_norm(&b));
             for i in 0..len {
                 let expected = a[i] * b[i];
                 let diff = (expected - decoded[i]).norm();
                 prop_assert!(
-                    // TODO: temp
-                    diff < 3.0,
+                    diff < err_bound,
                     "slot {i}: expected {expected}, got {}, diff {diff}", decoded[i]
                 );
             }

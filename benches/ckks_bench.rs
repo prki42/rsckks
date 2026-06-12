@@ -16,7 +16,7 @@ fn main_bench(c: &mut Criterion) {
     let ctx = gen_ckks_context(&CkksParams {
         first_mod_size: 61,
         scaling_size: 55,
-        mul_depth: 12,
+        mul_depth: 15,
         ring_dim: (1 << 15),
     })
     .unwrap();

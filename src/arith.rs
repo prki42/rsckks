@@ -11,8 +11,6 @@ pub enum ArithError {
     InvalidModulusSize(u64, u32),
 }
 
-// TODO: Barret reduction
-
 impl ModArith {
     pub fn new(modulus: u64) -> Result<Self, ArithError> {
         match modulus >> 61 {
@@ -75,6 +73,9 @@ impl ModArith {
         if a == 0 { 0 } else { self.modulus - a }
     }
 
+    /// Finds psi such that `order`^psi = 1 mod `self.modulus`
+    ///
+    /// Assumes `order` | `self.modulus` and `order` power of two
     pub fn primitive_root_of_unity(&self, order: u64) -> Option<u64> {
         debug_assert_eq!(
             (self.modulus - 1) % order,
@@ -82,6 +83,11 @@ impl ModArith {
             "order {order} does not divide q-1={}",
             self.modulus - 1
         );
+        debug_assert!(
+            order.is_power_of_two(),
+            "order {order} is not a power of two"
+        );
+
         let exp = (self.modulus - 1) / order;
         for g in 2..self.modulus {
             let root = self.pow(g, exp);
