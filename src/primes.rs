@@ -61,6 +61,20 @@ pub fn random_ntt_prime(size: u32, n: usize) -> u64 {
     }
 }
 
+pub fn distinct_random_ntt_primes(sizes: &[u32], n: usize) -> Vec<u64> {
+    let mut res = vec![];
+    for &size in sizes {
+        loop {
+            let p = random_ntt_prime(size, n);
+            if !res.contains(&p) {
+                res.push(p);
+                break;
+            }
+        }
+    }
+    res
+}
+
 fn mod_pow(mut base: u64, mut exp: u64, modulus: u64) -> u64 {
     if modulus == 1 {
         return 0;
@@ -164,6 +178,19 @@ mod test {
         // Largest prime below 2^64
         assert!(is_prime(u64::MAX - 58));
         assert!(!is_prime(u64::MAX)); // 2^64 - 1 = 3 * 5 * 17 * ...
+    }
+
+    #[test]
+    fn distinct_prime_generator() {
+        let count = 10;
+        let sizes = vec![55u32; count];
+        let primes = distinct_random_ntt_primes(&sizes, 256);
+        assert_eq!(
+            primes.len(),
+            count,
+            "generated {} number of primes instead of {count}",
+            primes.len()
+        );
     }
 
     proptest! {

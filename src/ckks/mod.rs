@@ -62,14 +62,3 @@ impl CkksContext {
         self.scale
     }
 }
-
-#[cfg(test)]
-pub(crate) mod test_utils {
-    use super::*;
-
-    // TODO: better test ctx, also should replace adhoc ctx creations in other tests
-
-    pub fn make_test_ctx() -> CkksContext {
-        CkksContext::new(&[998244353, 985661441, 754974721], &[469762049], 256, 64.0).unwrap()
-    }
-}

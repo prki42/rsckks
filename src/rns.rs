@@ -236,11 +236,6 @@ impl RnsRing {
         out
     }
 
-    /* TODO
-      Regarding base conversion related code, once i figure out where to keep track of levels
-      I should check the code below to make sure it complies with the decision.
-    */
-
     pub fn crt_coefficients(&self, poly: &Poly<CoeffForm>) -> Vec<Vec<u64>> {
         poly.limbs
             .iter()
@@ -362,6 +357,7 @@ impl RnsRing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::naive_negacyclic;
     use proptest::prelude::*;
 
     const Q_MODULI: &[u64] = &[7681, 12289, 40961];
@@ -377,21 +373,6 @@ mod tests {
             .iter()
             .map(|&q| proptest::collection::vec(0..q, N))
             .collect::<Vec<_>>()
-    }
-
-    fn naive_negacyclic(arith: &ModArith, a: &[u64], b: &[u64]) -> Vec<u64> {
-        let n = a.len();
-        let mut c = vec![0u64; n];
-        for i in 0..n {
-            for j in 0..n {
-                if i + j < n {
-                    c[i + j] = arith.add(c[i + j], arith.mul(a[i], b[j]));
-                } else {
-                    c[i + j - n] = arith.sub(c[i + j - n], arith.mul(a[i], b[j]));
-                }
-            }
-        }
-        c
     }
 
     proptest! {
@@ -510,10 +491,6 @@ mod tests {
         }
     }
 
-    fn make_q_ring() -> RnsRing {
-        RnsRing::new(Q_MODULI, N).unwrap()
-    }
-
     fn make_p_ring() -> RnsRing {
         RnsRing::new(P_MODULI, N).unwrap()
     }
@@ -555,7 +532,7 @@ mod tests {
 
         #[test]
         fn base_extend_q_to_p_error_bounded(coeffs in coeff_poly(3000)) {
-            let ring_q = make_q_ring();
+            let ring_q = make_rns_ring();
             let ring_p = make_p_ring();
             let cross = CrossRingPrecomp::new(&ring_q, &ring_p);
             let l = ring_q.num_moduli() as u64;
@@ -579,7 +556,7 @@ mod tests {
 
         #[test]
         fn mod_scale_down_small_values_near_zero(coeffs in coeff_poly(3000)) {
-            let ring_q = make_q_ring();
+            let ring_q = make_rns_ring();
             let ring_p = make_p_ring();
             let cross = CrossRingPrecomp::new(&ring_q, &ring_p);
             let k = ring_p.num_moduli() as u64;

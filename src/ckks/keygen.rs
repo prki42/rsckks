@@ -77,28 +77,26 @@ impl<'a> KeyGenerator<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ckks::test_utils::make_test_ctx;
-
-    // TODO: proper tests
+    use crate::test_utils::CKKS_TEST_ENVS;
 
     #[test]
     fn secretkey_gen() {
-        let ctx = make_test_ctx();
-        let k = KeyGenerator::new(&ctx);
+        let tc = &CKKS_TEST_ENVS[0];
+        let k = KeyGenerator::new(&tc.ctx);
         k.secret_key();
     }
 
     #[test]
     fn publickey_gen() {
-        let ctx = make_test_ctx();
-        let k = KeyGenerator::new(&ctx);
+        let tc = &CKKS_TEST_ENVS[0];
+        let k = KeyGenerator::new(&tc.ctx);
         k.public_key(&k.secret_key());
     }
 
     #[test]
     fn relinkey_gen() {
-        let ctx = make_test_ctx();
-        let k = KeyGenerator::new(&ctx);
+        let tc = &CKKS_TEST_ENVS[0];
+        let k = KeyGenerator::new(&tc.ctx);
         let sk = k.secret_key();
         k.relin_key(&sk);
     }

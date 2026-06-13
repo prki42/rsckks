@@ -24,80 +24,20 @@ impl<'a> Decryptor<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::ckks::{
-        encoder::Encoder,
-        encryptor::Encryptor,
-        keygen::KeyGenerator,
-        params::{CkksParams, gen_ckks_context},
-        test_utils::make_test_ctx,
-    };
-    use num_complex::Complex64;
+    use crate::test_utils::*;
     use proptest::prelude::*;
 
-    #[test]
-    fn decrypt_test() {
-        let ctx = make_test_ctx();
-        let k = KeyGenerator::new(&ctx);
-        let sk = k.secret_key();
-        let e = Decryptor::new(&ctx, &sk);
-
-        let mut rng = rand::rng();
-
-        let ct = Ciphertext {
-            c0: ctx.ring_q.sample_uniform(&mut rng),
-            c1: ctx.ring_q.sample_uniform(&mut rng),
-            scale: 10.0,
-        };
-
-        e.decrypt(&ct);
-    }
-
-    fn complex_vec(max_val: f64, max_len: usize) -> impl Strategy<Value = Vec<Complex64>> {
-        proptest::collection::vec((-max_val..max_val, -max_val..max_val), 1..=max_len).prop_map(
-            |v| {
-                v.into_iter()
-                    .map(|(re, im)| Complex64::new(re, im))
-                    .collect()
-            },
-        )
-    }
-
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(30))]
+        #![proptest_config(no_persist(30))]
 
         #[test]
-        fn encrypt_decrypt_roundtrip(values in complex_vec(10.0, 8)) {
-
-            // TODO: use make_test_ctx when you figure out proper examples and bounds
-            let ctx = gen_ckks_context(&CkksParams {
-                first_mod_size: 61,
-                scaling_size: 55,
-                mul_depth: 15,
-                ring_dim: 16,
-            })
-            .unwrap();
-
-            let keygen = KeyGenerator::new(&ctx);
-            let sk = keygen.secret_key();
-            let pk = keygen.public_key(&sk);
-            let enc = Encryptor::new(&ctx, &pk);
-            let dec = Decryptor::new(&ctx, &sk);
-            let encoder = Encoder::new(&ctx);
-
-            let pt = encoder.encode(&values, &ctx);
-            let ct = enc.encrypt(&pt);
-            let pt_dec = dec.decrypt(&ct);
-            let result = encoder.decode(&pt_dec, &ctx);
-
-            for (i, (&expected, &actual)) in values.iter().zip(result.iter()).enumerate() {
-                let diff = (expected - actual).norm();
-                prop_assert!(
-                    // TODO: change to a proper bound
-                    diff < 1.0,
-                    "slot {i}: expected {expected}, got {actual}, diff {diff}"
-                );
-            }
+        fn encrypt_decrypt_roundtrip(
+            (tc, values) in with_test_env(|tc| complex_vec(1.0, tc.slots()))
+        ) {
+            let ct = tc.encrypt(&values);
+            let result = tc.decrypt_decode(&ct);
+            // TODO: change to a proper bound
+            assert_slots_approx(&values, &result, 1.0)?;
         }
     }
 }

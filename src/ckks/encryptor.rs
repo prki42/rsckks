@@ -51,23 +51,22 @@ impl<'a> Encryptor<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ckks::{keygen::KeyGenerator, test_utils::make_test_ctx};
+    use crate::ckks::keygen::KeyGenerator;
+    use crate::test_utils::CKKS_TEST_ENVS;
 
     #[test]
-    fn encrypt_test() {
-        let ctx = make_test_ctx();
-        let k = KeyGenerator::new(&ctx);
-        let sk = k.secret_key();
-        let pk = k.public_key(&sk);
-        let e = Encryptor::new(&ctx, &pk);
+    fn encrypt_produces_ciphertext() {
+        let tc = &CKKS_TEST_ENVS[0];
+        let keygen = KeyGenerator::new(&tc.ctx);
+        let pk = keygen.public_key(&tc.sk);
+        let enc = Encryptor::new(&tc.ctx, &pk);
 
         let mut rng = rand::rng();
-
         let pt = Plaintext {
-            data: ctx.ring_q.sample_uniform(&mut rng),
+            data: tc.ctx.ring_q.sample_uniform(&mut rng),
             scale: 1.0,
         };
 
-        e.encrypt(&pt);
+        enc.encrypt(&pt);
     }
 }

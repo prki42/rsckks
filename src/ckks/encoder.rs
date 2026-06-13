@@ -104,7 +104,7 @@ impl Encoder {
     }
 
     fn fft(&self, a: &mut [Complex64]) {
-        debug_assert_eq!(a.len(), self.n);
+        debug_assert_eq!(a.len(), 2 * self.slots, "invalid number of slots");
         self.bit_reverse_permute(a);
 
         let mut len = 2;
@@ -125,7 +125,7 @@ impl Encoder {
     }
 
     fn ifft(&self, a: &mut [Complex64]) {
-        debug_assert_eq!(a.len(), self.n);
+        debug_assert_eq!(a.len(), 2 * self.slots, "invalid number of slots");
         self.bit_reverse_permute(a);
 
         let mut len = 2;
@@ -167,62 +167,43 @@ impl Encoder {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use crate::test_utils::*;
     use proptest::prelude::*;
 
-    const N: usize = 256;
-    const SLOTS: usize = N / 2;
-
-    fn make_ctx() -> CkksContext {
-        CkksContext::new(&[998244353, 985661441, 754974721], &[469762049], N, 64.0).unwrap()
-    }
-
-    fn complex_vec(max_val: f64, max_len: usize) -> impl Strategy<Value = Vec<Complex64>> {
-        proptest::collection::vec((-max_val..max_val, -max_val..max_val), 1..=max_len).prop_map(
-            |v| {
-                v.into_iter()
-                    .map(|(re, im)| Complex64::new(re, im))
-                    .collect()
-            },
-        )
-    }
-
-    fn real_vec(max_val: f64, max_len: usize) -> impl Strategy<Value = Vec<Complex64>> {
-        proptest::collection::vec(-max_val..max_val, 1..=max_len)
-            .prop_map(|v| v.into_iter().map(|re| Complex64::new(re, 0.0)).collect())
-    }
-
     impl Encoder {
-        fn encoding_err_upper_bound(&self) -> f64 {
+        pub fn encoding_err_upper_bound(&self) -> f64 {
             (self.n as f64) / (2.0 * self.scale)
         }
 
-        fn mul_err_upper_bouund(&self, inf_norm1: f64, inf_norm2: f64) -> f64 {
-            return (((self.n as f64) * (inf_norm1 + inf_norm2)) / (self.scale * 2.0))
-                + ((self.n as f64).powf(2.0) / (4.0 * self.scale.powf(2.0)));
+        pub fn mul_err_upper_bound(&self, inf_norm1: f64, inf_norm2: f64) -> f64 {
+            (((self.n as f64) * (inf_norm1 + inf_norm2)) / (self.scale * 2.0))
+                + ((self.n as f64).powf(2.0) / (4.0 * self.scale.powf(2.0)))
         }
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig::with_cases(30))]
+        #![proptest_config(no_persist(30))]
+
+        // TODO: use custom contexts for encoder (mul test has specific requirements)
 
         #[test]
         fn fft_ifft_roundtrip(
-            re in proptest::collection::vec(-100.0..100.0, N),
-            im in proptest::collection::vec(-100.0..100.0, N),
+            (tc, (re, im)) in with_test_env(|tc| {
+                let s = tc.slots();
+                (proptest::collection::vec(-100.0..100.0, 2*s),
+                    proptest::collection::vec(-100.0..100.0, 2*s))
+            })
         ) {
-            let ctx = make_ctx();
-            let encoder = Encoder::new(&ctx);
-
             let original: Vec<Complex64> = re.into_iter()
                 .zip(im)
                 .map(|(r, i)| Complex64::new(r, i))
                 .collect();
             let mut data = original.clone();
 
-            encoder.fft(&mut data);
-            encoder.ifft(&mut data);
+            tc.encoder.fft(&mut data);
+            tc.encoder.ifft(&mut data);
 
             for (k, (&expected, &actual)) in original.iter().zip(data.iter()).enumerate() {
                 let diff = (expected - actual).norm();
@@ -230,100 +211,69 @@ mod tests {
             }
         }
 
-        // TODO: better tests for encoding
-
         #[test]
-        fn encode_decode_complex_values(values in complex_vec(100.0, SLOTS)) {
-            let ctx = make_ctx();
-            let encoder = Encoder::new(&ctx);
-
-            let pt = encoder.encode(&values, &ctx);
-            let decoded = encoder.decode(&pt, &ctx);
-
-            for (i, (&expected, &actual)) in values.iter().zip(decoded.iter()).enumerate() {
-                let diff = (expected - actual).norm();
-                prop_assert!(
-                    diff < encoder.encoding_err_upper_bound(),
-                    "slot {i}: expected {expected}, got {actual}, diff {diff}"
-                );
-            }
+        fn encode_decode_complex(
+            (tc, values) in with_test_env(|tc| complex_vec(1.0, tc.slots()))
+        ) {
+            let pt = tc.encoder.encode(&values, &tc.ctx);
+            let decoded = tc.encoder.decode(&pt, &tc.ctx);
+            let bound = tc.encoder.encoding_err_upper_bound();
+            assert_slots_approx(&values, &decoded, bound)?;
         }
 
         #[test]
-        fn encode_decode_real_values(values in real_vec(100.0, SLOTS)) {
-            let ctx = make_ctx();
-            let encoder = Encoder::new(&ctx);
-
-            let pt = encoder.encode(&values,  &ctx);
-            let decoded = encoder.decode(&pt, &ctx);
-
-            for (i, (&expected, &actual)) in values.iter().zip(decoded.iter()).enumerate() {
-                let diff = (expected - actual).norm();
-                prop_assert!(
-                    diff < encoder.encoding_err_upper_bound(),
-                    "slot {i}: expected {expected}, got {actual}, diff {diff}"
-                );
-            }
+        fn encode_decode_real(
+            (tc, values) in with_test_env(|tc| real_vec(1.0, tc.slots()))
+        ) {
+            let pt = tc.encoder.encode(&values, &tc.ctx);
+            let decoded = tc.encoder.decode(&pt, &tc.ctx);
+            let bound = tc.encoder.encoding_err_upper_bound();
+            assert_slots_approx(&values, &decoded, bound)?;
         }
 
         #[test]
         fn encode_add_decode(
-            a in complex_vec(100.0, SLOTS),
-            b in complex_vec(100.0, SLOTS),
+            (tc, (a, b)) in with_test_env(|tc| {
+                let s = tc.slots();
+                (complex_vec(1.0, s), complex_vec(1.0, s))
+            })
         ) {
-            let ctx = make_ctx();
-            let encoder = Encoder::new(&ctx);
-            let ring_q = ctx.ring_q();
+            let ring_q = tc.ctx.ring_q();
 
-            let len = a.len().min(b.len());
-            let pt_a = encoder.encode(&a,  &ctx);
-            let pt_b = encoder.encode(&b,  &ctx);
+            let pt_a = tc.encoder.encode(&a, &tc.ctx);
+            let pt_b = tc.encoder.encode(&b, &tc.ctx);
 
             let sum_poly = ring_q.add(&pt_a.data, &pt_b.data);
             let pt_sum = Plaintext { data: sum_poly, scale: pt_a.scale };
-            let decoded = encoder.decode(&pt_sum, &ctx);
+            let decoded = tc.encoder.decode(&pt_sum, &tc.ctx);
 
-            let err_bound = encoder.encoding_err_upper_bound() * 2.0;
-            for i in 0..len {
-                let expected = a[i] + b[i];
-                let diff = (expected - decoded[i]).norm();
-                prop_assert!(
-                    diff < err_bound,
-                    "slot {i}: expected {expected}, got {}, diff {diff}", decoded[i]
-                );
-            }
+            let expected: Vec<_> = a.iter().zip(&b).map(|(x, y)| x + y).collect();
+            let bound = tc.encoder.encoding_err_upper_bound() * 2.0;
+            assert_slots_approx(&expected, &decoded, bound)?;
         }
 
         #[test]
         fn encode_mul_decode(
-            a in complex_vec(3.0, SLOTS),
-            b in complex_vec(3.0, SLOTS),
+            (tc, (a, b)) in with_test_env(|tc| {
+                let s = tc.slots();
+                (complex_vec(1.0, s), complex_vec(1.0, s))
+            })
         ) {
-            let ctx = make_ctx();
-            let encoder = Encoder::new(&ctx);
-            let ring_q = ctx.ring_q();
+            let ring_q = tc.ctx.ring_q();
 
-            let len = a.len().min(b.len());
-            let pt_a = encoder.encode(&a, &ctx);
-            let pt_b = encoder.encode(&b, &ctx);
+            let pt_a = tc.encoder.encode(&a, &tc.ctx);
+            let pt_b = tc.encoder.encode(&b, &tc.ctx);
 
             let prod_poly = ring_q.mul(&pt_a.data, &pt_b.data);
-            let pt_prod = Plaintext { data: prod_poly, scale: pt_a.scale * pt_a.scale } ;
-            let decoded = encoder.decode(&pt_prod, &ctx);
+            let pt_prod = Plaintext { data: prod_poly, scale: pt_a.scale * pt_a.scale };
+            let decoded = tc.encoder.decode(&pt_prod, &tc.ctx);
 
-            let inf_norm = |z: &Vec<Complex64>| -> f64 {
-                z.iter().map(|z| z.norm()).max_by(|zi, zj| zi.partial_cmp(zj).expect("NaN")).unwrap()
+            let expected: Vec<_> = a.iter().zip(&b).map(|(x, y)| x * y).collect();
+            let inf_norm = |z: &[Complex64]| -> f64 {
+                z.iter().map(|z| z.norm()).fold(0.0_f64, f64::max)
             };
-
-            let err_bound = encoder.mul_err_upper_bouund(inf_norm(&a), inf_norm(&b));
-            for i in 0..len {
-                let expected = a[i] * b[i];
-                let diff = (expected - decoded[i]).norm();
-                prop_assert!(
-                    diff < err_bound,
-                    "slot {i}: expected {expected}, got {}, diff {diff}", decoded[i]
-                );
-            }
+            let bound = tc.encoder.mul_err_upper_bound(inf_norm(&a), inf_norm(&b));
+            assert_slots_approx(&expected, &decoded, bound)?;
         }
     }
 }

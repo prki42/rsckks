@@ -118,6 +118,7 @@ impl Ring {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::naive_negacyclic;
     use proptest::prelude::*;
 
     const Q: u64 = 7681;
@@ -129,21 +130,6 @@ mod tests {
 
     fn poly_vec() -> impl Strategy<Value = Vec<u64>> {
         proptest::collection::vec(0..Q, N)
-    }
-
-    fn naive_negacyclic(arith: &ModArith, a: &[u64], b: &[u64]) -> Vec<u64> {
-        let n = a.len();
-        let mut c = vec![0u64; n];
-        for i in 0..n {
-            for j in 0..n {
-                if i + j < n {
-                    c[i + j] = arith.add(c[i + j], arith.mul(a[i], b[j]));
-                } else {
-                    c[i + j - n] = arith.sub(c[i + j - n], arith.mul(a[i], b[j]));
-                }
-            }
-        }
-        c
     }
 
     proptest! {

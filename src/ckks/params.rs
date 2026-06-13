@@ -1,8 +1,9 @@
 use thiserror::Error;
 
 use crate::ckks::{CkksContext, CkksContextErr};
-use crate::primes::random_ntt_prime;
+use crate::primes::distinct_random_ntt_primes;
 
+#[derive(Debug)]
 pub struct CkksParams {
     pub first_mod_size: u32,
     pub scaling_size: u32,
@@ -48,24 +49,23 @@ pub fn gen_ckks_context(params: &CkksParams) -> Result<CkksContext, ParamsErr> {
         ));
     }
 
-    let mut q_moduli = vec![0u64; params.mul_depth + 1];
-    q_moduli[0] = random_ntt_prime(params.first_mod_size, n);
+    let (q_moduli, p_moduli) = {
+        let qi_total_bitsize =
+            (params.mul_depth as u32) * params.scaling_size + params.first_mod_size;
+        let q_count = params.mul_depth + 1;
+        let pi_bitsize = 61;
+        let p_count = qi_total_bitsize.div_ceil(pi_bitsize) as usize;
 
-    let mut all_moduli = vec![q_moduli[0]];
+        let mut moduli_sizes = vec![params.first_mod_size];
+        (0..params.mul_depth).for_each(|_| moduli_sizes.push(params.scaling_size));
+        moduli_sizes.append(&mut vec![pi_bitsize; p_count]);
 
-    for qi in q_moduli.iter_mut().skip(1) {
-        *qi = random_ntt_prime_excluding(params.scaling_size, n, &all_moduli);
-        all_moduli.push(*qi);
-    }
+        let mut all_moduli = distinct_random_ntt_primes(&moduli_sizes, n);
+        let p_moduli = all_moduli.split_off(q_count);
+        (all_moduli, p_moduli)
+    };
 
-    let q_bitsize = (params.mul_depth as u32) * params.scaling_size + params.first_mod_size;
-    let pi_bitsize = 61;
-    let mut p_moduli = vec![0u64; q_bitsize.div_ceil(pi_bitsize) as usize];
-
-    for pi in p_moduli.iter_mut() {
-        *pi = random_ntt_prime_excluding(pi_bitsize, n, &all_moduli);
-        all_moduli.push(*pi);
-    }
+    debug_assert!(q_moduli.len() == params.mul_depth + 1);
 
     Ok(CkksContext::new(
         &q_moduli,
@@ -73,15 +73,6 @@ pub fn gen_ckks_context(params: &CkksParams) -> Result<CkksContext, ParamsErr> {
         params.ring_dim,
         (1u64 << params.scaling_size) as f64,
     )?)
-}
-
-fn random_ntt_prime_excluding(size: u32, n: usize, all_moduli: &[u64]) -> u64 {
-    loop {
-        let p = random_ntt_prime(size, n);
-        if !all_moduli.contains(&p) {
-            break p;
-        }
-    }
 }
 
 #[cfg(test)]
